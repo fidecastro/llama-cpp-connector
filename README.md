@@ -195,9 +195,9 @@ docker run --gpus all -v /path/to/your/models:/workspace/models -it llama-cpp-co
 ## Why llama-cpp-connector?
 
 - **Simplified integration**: No need to directly interface with llama.cpp's C++ code
-- **Configuration over code**: Change model behavior without touching code
+- **Simplified configuration**: Change model behavior just by editing a JSON script
 - **Docker-first approach**: Consistent environment across development and deployment
-- **Minimal dependencies**: Just Python and Docker
+- **Minimal dependencies**: Just have llama.cpp binaries and you're done
 - **OpenAI-compatible**: Use familiar APIs with local models
 
 ## License
