@@ -2,7 +2,7 @@ import subprocess
 import asyncio
 import os
 import json
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional
 
 class LlamaVisionConnector:
     """
