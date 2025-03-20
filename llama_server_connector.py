@@ -139,7 +139,7 @@ class LlamaServerConnector:
         """Build the llama-server command with all necessary parameters from config."""
         # Default command with model path
         cmd = [
-            self.model_config.get("CLI_CMD", "llama-server"),
+            "llama-server",
             "-m", self.model_path,
         ]
         
