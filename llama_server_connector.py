@@ -21,6 +21,7 @@ class LlamaServerConnector:
     def __init__(self, 
                  config_path: str = "config/models.json",
                  model_key: str = None,
+                 param_overrides: Optional[Dict[str, Any]] = None,
                  initial_port: int = 8080,
                  host: str = "127.0.0.1",
                  max_attempts: int = 10,
@@ -32,6 +33,7 @@ class LlamaServerConnector:
             config_path (str): Path to the configuration JSON file
             model_key (str, optional): Key of the model to use from config.
                                      If None, will look for a model with appropriate config.
+            param_overrides (Dict[str, Any], optional): Parameter overrides from config.json
             initial_port (int): Initial port to try for the server
             host (str): Host address for the server
             max_attempts (int): Maximum number of attempts to connect to the server
@@ -70,6 +72,11 @@ class LlamaServerConnector:
             self.model_key = model_key
             self.model_path = self.model_config.get("MODEL_PATH")
             
+            # Apply parameter overrides if provided
+            if param_overrides:
+                print(f"Applying parameter overrides: {param_overrides}")
+                self.model_config.update(param_overrides)
+            
             if not self.model_path:
                 raise ValueError(f"Model path not specified for model: {model_key}")
             
@@ -99,12 +106,13 @@ class LlamaServerConnector:
         except json.JSONDecodeError:
             raise ValueError(f"Invalid JSON in configuration file: {config_path}")
 
-    def set_model(self, model_key: str) -> None:
+    def set_model(self, model_key: str, param_overrides: Optional[Dict[str, Any]] = None) -> None:
         """
         Change the model configuration and restart the server.
         
         Args:
             model_key (str): Key of the model in the configuration
+            param_overrides (Dict[str, Any], optional): Parameter overrides from config.json
         """
         if model_key not in self.config.get("MODELS", {}):
             raise ValueError(f"Model '{model_key}' not found in configuration")
@@ -116,6 +124,11 @@ class LlamaServerConnector:
         self.model_config = self.config["MODELS"][model_key]
         self.model_key = model_key
         self.model_path = self.model_config.get("MODEL_PATH")
+        
+        # Apply parameter overrides if provided
+        if param_overrides:
+            print(f"Applying parameter overrides for model change: {param_overrides}")
+            self.model_config.update(param_overrides)
         
         # Reinitialize server
         self.urlport = self.find_available_port(self.initial_port, self.host)
@@ -197,6 +210,7 @@ class LlamaServerConnector:
         """Start the llama-server if it's not already running."""
         if not self.is_server_running():
             cmd = self.build_server_command()
+            print(f"Starting server with command: {' '.join(cmd)}")
             
             if self._process is None or self._process.poll() is not None:
                 self._process = subprocess.Popen(cmd)
@@ -271,7 +285,11 @@ if __name__ == "__main__":
     # Initialize the server with configuration from config.json
     connector = LlamaServerConnector(
         config_path="config/models.json",
-        model_key="DEEPSEEK-R1-QWEN-14B"  # Specify the model key from config
+        model_key="DEEPSEEK-R1-QWEN-14B",  # Specify the model key from config
+        param_overrides={
+            "TEMPERATURE": 0.5,
+            "NUM_TOKENS_TO_OUTPUT": 32000
+        }
     )
     
     # Get the server URL (just for information)
