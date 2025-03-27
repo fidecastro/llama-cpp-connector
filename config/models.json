@@ -2,6 +2,17 @@
     "VISION_PROMPT_FILENAME": "vision-prompt.txt",
     "VALID_IMAGE_EXTENSIONS": [".jpg", ".jpeg", ".png", ".gif"],
     "MODELS": {
+        "QVQ_72B_PREVIEW": {
+            "CLI_CMD": "llama-qwen2vl-cli",
+            "MODEL_PATH": "models/QVQ-72B-Preview-GGUF",      
+            "MMPROJ_PATH": "models/mmproj-QVQ-72B-Preview-f16.gguf",
+            "CACHE_TYPE_K": "q8_0",
+            "CACHE_TYPE_V": "q8_0",
+            "TEMPERATURE": 0.3,
+            "NUM_LAYERS_TO_GPU": 99,
+            "NUM_TOKENS_TO_OUTPUT": 12772,
+            "NUM_TOKENS_OF_CONTEXT": 20000
+        },
         "GEMMA3_12B":
         {
             "CLI_CMD": "llama-gemma3-cli",
