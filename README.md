@@ -1,17 +1,17 @@
 # llama-cpp-connector
 
-Super simple Python connectors for llama.cpp, including vision models (Gemma 3, Qwen2-VL). Compile llama.cpp and run!
+Super simple Python connectors for llama.cpp, including vision models (Gemma 3, Qwen2-VL, QVQ). Compile llama.cpp and run!
 
 ## Overview
 
-This project provides lightweight Python connectors to easily interact with llama.cpp models, supporting both standard text models and multimodal vision models (currently Gemma 3 and Qwen2-VL). It creates a simple framework to build applications on top of llama.cpp while handling the complexity of model configuration, server management, and inference.
+This project provides lightweight Python connectors to easily interact with llama.cpp models, supporting both standard text models and multimodal vision models (currently Gemma 3, Qwen2-VL, and QVQ). It creates a simple framework to build applications on top of llama.cpp while handling the complexity of model configuration, server management, and inference.
 
 The idea behind it is simple: to offer a minimalistic environment for Python coders to directly interact with llama.cpp without intermediaries like Ollama or LMStudio. Just go to HuggingFace, download your models, use the connectors and have fun!
 
 ## Features
 
 - 🚀 **Easy to use**: Only two Python classes to interact with local LLMs: `LlamaServerConnector` and `LlamaVisionConnector`
-- 🖼️ **Vision model support**: Ready-to-use connectors for Gemma 3 and Qwen2-VL vision models
+- 🖼️ **Vision model support**: Ready-to-use connectors for Gemma 3, Qwen2-VL, and QVQ vision models
 - 🔄 **OpenAI-compatible API**: Use the `LlamaServerConnector` with the OpenAI Python client
 - ⚙️ **Configurable**: simple JSON-based configuration for all model parameters
 - 🐳 **Docker ready**: Build once, prepare your container, run `docker commit` and your LLM-powered app is done
@@ -32,7 +32,7 @@ This component provides an OpenAI-compatible server interface for text-based mod
 
 ### 2. LlamaVisionConnector (`llama_vision_connector.py`)
 
-For multimodal vision models (Gemma 3, Qwen2-VL):
+For multimodal vision models (Gemma 3, Qwen2-VL, QVQ):
 
 - Process images with text prompts
 - Automatically handles configuration for different vision models
@@ -149,6 +149,14 @@ Models are configured in `config/models.json`:
 ```json
 {
     "MODELS": {
+        "QVQ_72B_PREVIEW": {
+            "CLI_CMD": "llama-qwen2vl-cli",
+            "MODEL_PATH": "models/QVQ-72B-Preview-GGUF",      
+            "MMPROJ_PATH": "models/mmproj-QVQ-72B-Preview-f16.gguf",
+            "TEMPERATURE": 0.3,
+            "NUM_LAYERS_TO_GPU": 99
+            // Other parameters...
+        },
         "GEMMA3_12B": {
             "CLI_CMD": "llama-gemma3-cli",
             "MODEL_PATH": "models/gemma-3-12b-it-Q6_K_L.gguf",      
