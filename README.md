@@ -13,6 +13,7 @@ The idea behind it is simple: to offer a minimalistic environment for Python cod
 - 🚀 **Easy to use**: Only two Python classes to interact with local LLMs: `LlamaServerConnector` and `LlamaVisionConnector`
 - 🖼️ **Vision model support**: Ready-to-use connectors for Gemma 3, Qwen2-VL, and QVQ vision models
 - 🔄 **OpenAI-compatible API**: Use the `LlamaServerConnector` with the OpenAI Python client
+- 🔄 **OpenAI-compatible Vision API**: Use the vision models through a standard OpenAI chat completions interface
 - ⚙️ **Configurable**: simple JSON-based configuration for all model parameters
 - 🐳 **Docker ready**: Build once, prepare your container, run `docker commit` and your LLM-powered app is done
 - 🧠 **Great for pros**: A perfect sandbox for those familiar with llama.cpp!
@@ -141,6 +142,57 @@ async def process_image():
 # Run the async function
 asyncio.run(process_image())
 ```
+
+### Using the OpenAI-compatible Vision Server
+
+For vision models, you can now use a standard OpenAI-compatible interface through the `openai_server.py`. This allows you to integrate vision models with any OpenAI-compatible client, including open-webui or roo-code.
+
+```python
+import openai
+import base64
+
+# Initialize the OpenAI client
+client = openai.OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="not-needed"  # The server doesn't require authentication
+)
+
+# Read and encode your image
+with open("path/to/image.jpg", "rb") as image_file:
+    image_data = base64.b64encode(image_file.read()).decode('utf-8')
+    image_url = f"data:image/jpeg;base64,{image_data}"
+
+# Create a chat completion with the image
+response = client.chat.completions.create(
+    model="llama-vision",  # Use the model ID from /v1/models endpoint
+    messages=[
+        {"role": "user", "content": "Describe this image in detail"},
+        {"role": "user", "content": image_url}  # Image must be the last message
+    ],
+    temperature=0.7
+)
+
+print(response.choices[0].message.content)
+```
+
+To start the server:
+```bash
+python openai_server.py
+```
+
+The server will run on `http://localhost:8000` and provides the following endpoints:
+- `POST /v1/chat/completions`: Create a chat completion with vision capabilities
+  - The last message must contain the image in base64 format
+  - Previous messages are used as the prompt
+  - Supports all vision models configured in `config/models.json`
+- `GET /v1/models`: List available models from your configuration
+
+#### Important Notes:
+- The server supports all vision models configured in your `config/models.json`
+- Images must be provided as base64-encoded strings in the last message
+- The server automatically handles temporary file cleanup
+- CORS is enabled for web client support
+- No authentication is required (suitable for local use)
 
 ## Configuration
 
