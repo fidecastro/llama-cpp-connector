@@ -46,9 +46,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Add virtualenv activation to .bashrc so it's activated in interactive shells
 RUN echo 'source /opt/venv/bin/activate' >> /root/.bashrc
 
-# Install Python dependencies in the virtual environment
+# Copy requirements file into the image
+COPY requirements.txt /tmp/requirements.txt
+
+# Install Python dependencies from requirements.txt in the virtual environment
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir requests openai
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt # Clean up requirements file
 
 # Copy artifacts from build stage
 COPY --from=build /app/artifacts/libs/* /usr/local/lib/
@@ -57,13 +61,14 @@ COPY --from=build /app/artifacts/* /usr/local/bin/
 # Set up library path
 ENV LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
 
-# Create workspace directory
-RUN mkdir -p /workspace/config
+# Create workspace directory structure
+RUN mkdir -p /workspace/config /workspace/models /workspace/examples/test_images
 
-# Copy Python connector files and config folder to workspace
+# Copy Python connector files, config folder, and examples to workspace
 COPY llama_vision_connector.py llama_server_connector.py /workspace/
 COPY config/ /workspace/config/
 COPY models/ /workspace/models/
+COPY examples/ /workspace/examples/
 
 # Set workspace as working directory
 WORKDIR /workspace

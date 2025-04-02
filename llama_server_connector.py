@@ -5,6 +5,7 @@ import json
 import os
 import openai
 from typing import Dict, List, Any, Optional
+import atexit
 
 class LlamaServerConnector:
     """
@@ -16,6 +17,7 @@ class LlamaServerConnector:
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(LlamaServerConnector, cls).__new__(cls)
+            cls._instance._process = None # Ensure process is None on new instance
         return cls._instance
 
     def __init__(self, 
@@ -25,7 +27,8 @@ class LlamaServerConnector:
                  initial_port: int = 8080,
                  host: str = "127.0.0.1",
                  max_attempts: int = 10,
-                 attempt_delay: int = 1):
+                 attempt_delay: int = 1,
+                 debug_server: bool = False):
         """
         Initialize the LlamaServerConnector with configuration from a JSON file.
         
@@ -38,28 +41,38 @@ class LlamaServerConnector:
             host (str): Host address for the server
             max_attempts (int): Maximum number of attempts to connect to the server
             attempt_delay (int): Delay between connection attempts in seconds
+            debug_server (bool): If True, enable detailed debug printing for server process management.
         """
-        if not hasattr(self, 'initialized'):
-            # Load configuration
-            self.config = self._load_config(config_path)
-            
-            # Network configuration
-            self.host = host
-            self.initial_port = initial_port
-            self.max_attempts = max_attempts
-            self.attempt_delay = attempt_delay
-            
-            # Set up model configuration
-            models_config = self.config.get("MODELS", {})
-            if not models_config:
-                raise ValueError("No models found in configuration")
+        # Initialization guard prevents re-running init on the singleton instance
+        if hasattr(self, 'initialized') and self.initialized:
+            # Optionally check if key parameters changed and reconfigure/restart if needed
+            # For now, we assume the first initialization is definitive for the singleton.
+            if self.debug_server: print(">>> DEBUG: LlamaServerConnector already initialized. Skipping re-init.")
+            return
+
+        # Proceed with initialization only if instance doesn't exist or is not initialized
+        print(f"Initializing LlamaServerConnector...")
+        self.debug_server = debug_server # STORE the flag
+        self.config_path = config_path
+        self.config = self._load_config(config_path)
+        self.initial_port = initial_port
+        
+        # Network configuration
+        self.host = host
+        self.max_attempts = max_attempts
+        self.attempt_delay = attempt_delay
+        
+        # Set up model configuration
+        models_config = self.config.get("MODELS", {})
+        if not models_config:
+            raise ValueError("No models found in configuration")
                 
-            # If no model key is provided, use first model that doesn't require mmproj (non-vision model)
-            if model_key is None:
-                for key, model in models_config.items():
-                    if "MMPROJ_PATH" not in model or not model.get("MMPROJ_PATH"):
-                        model_key = key
-                        break
+        # If no model key is provided, use first model that doesn't require mmproj (non-vision model)
+        if model_key is None:
+            for key, model in models_config.items():
+                if "MMPROJ_PATH" not in model or not model.get("MMPROJ_PATH"):
+                    model_key = key
+                    break
                 
                 # If still no model found, use the first one
                 if model_key is None and models_config:
@@ -87,6 +100,9 @@ class LlamaServerConnector:
             # Start server
             self.start_server()
             self.initialized = True
+
+            # Register kill_server to be called on script exit
+            atexit.register(self.kill_server)
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """
@@ -213,28 +229,98 @@ class LlamaServerConnector:
             print(f"Starting server with command: {' '.join(cmd)}")
             
             if self._process is None or self._process.poll() is not None:
-                self._process = subprocess.Popen(cmd)
+                if self.debug_server: print(">>> DEBUG: Attempting subprocess.Popen...")
+                self._process = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                if self.debug_server: print(f">>> DEBUG: subprocess.Popen succeeded. PID: {self._process.pid}")
                 print(f"Server process started with PID: {self._process.pid}")
                 
                 attempts = 0
-                while not self.is_server_running():
+                while True:
+                    if self.debug_server: print(f">>> DEBUG: Startup attempt {attempts + 1}/{self.max_attempts}...")
+                    if self.is_server_running():
+                        print(f"Server startup completed after {attempts + 1} attempts with PID {self._process.pid} on port {self.urlport}")
+                        time.sleep(0.5)
+                        break
+
+                    if self._process.poll() is not None:
+                        poll_result = self._process.poll()
+                        if self.debug_server: print(f">>> DEBUG: Server process terminated prematurely. Code: {poll_result}")
+                        print(f"ERROR: Server process terminated unexpectedly with code {poll_result}. Reading output...")
+                        stdout, stderr = "", ""
+                        try:
+                            if self.debug_server: print(">>> DEBUG: Attempting communicate() on premature exit...")
+                            stdout, stderr = self._process.communicate(timeout=1) 
+                            if self.debug_server: print(">>> DEBUG: communicate() finished.")
+                            if stdout: print(f"--- Subprocess Stdout (Premature Exit) ---\n{stdout}")
+                            if stderr: print(f"--- Subprocess Stderr (Premature Exit) ---\n{stderr}")
+                        except Exception as comm_e:
+                             print(f"Error reading output from prematurely terminated process: {comm_e}")
+                        self._process = None
+                        raise RuntimeError(f"Server process failed to start properly, terminated with code {poll_result}.")
+                    
                     if attempts >= self.max_attempts:
-                        raise RuntimeError(f"Server startup failed after {attempts} attempts.")
+                        if self.debug_server: print(">>> DEBUG: Max attempts reached.")
+                        stdout, stderr = "", ""
+                        if self._process:
+                             poll_result_final = self._process.poll()
+                             if poll_result_final is None:
+                                  if self.debug_server: print(">>> DEBUG: Process unresponsive. Attempting to kill and get output...")
+                                  try:
+                                       self._process.kill()
+                                       stdout, stderr = self._process.communicate(timeout=2)
+                                       if stdout: print(f"--- Subprocess Stdout (Unresponsive Killed) ---\n{stdout}")
+                                       if stderr: print(f"--- Subprocess Stderr (Unresponsive Killed) ---\n{stderr}")
+                                  except Exception as kill_comm_e:
+                                       print(f"Error getting output after killing unresponsive process: {kill_comm_e}")
+                             else:
+                                  if self.debug_server: print(f">>> DEBUG: Process terminated between checks. Code: {poll_result_final}. Reading output...")
+                                  try:
+                                       stdout, stderr = self._process.communicate(timeout=1) 
+                                       if stdout: print(f"--- Subprocess Stdout (Late Exit) ---\n{stdout}")
+                                       if stderr: print(f"--- Subprocess Stderr (Late Exit) ---\n{stderr}")
+                                  except Exception as late_comm_e:
+                                       print(f"Error reading output from late-terminated process: {late_comm_e}")
+                        self._process = None
+                        raise RuntimeError(f"Server startup failed after {self.max_attempts} attempts.")
+                        
+                    if self.debug_server: print(f">>> DEBUG: Sleeping for {self.attempt_delay}s...")
                     time.sleep(self.attempt_delay)
                     attempts += 1
                 
-                print(f"Server startup completed after {attempts} attempts with PID {self._process.pid} on port {self.urlport}")
-                time.sleep(0.5)
+            else:
+                if self.debug_server: print(">>> DEBUG: start_server called but process exists and is running (PID {self._process.pid if self._process else 'N/A'}). Skipping Popen.")
 
     def kill_server(self):
         """Kill the llama-server process and clean up."""
+        if self.debug_server: print(f">>> DEBUG: kill_server called. self._process is {'set' if self._process else 'None'}")
         try:
             if self._process is not None and self._process.poll() is None:
+                pid = self._process.pid
+                if self.debug_server: print(f">>> DEBUG: Attempting to kill process {pid}...")
                 self._process.kill()
-                print("kill_server: Server process killed.")
+                try:
+                    self._process.wait(timeout=1.0)
+                    if self.debug_server: print(f">>> DEBUG: Process {pid} confirmed terminated after kill.")
+                except subprocess.TimeoutExpired:
+                    if self.debug_server: print(f">>> DEBUG: Process {pid} did not terminate immediately after kill (Timeout). Force clearing handle.")
+                except Exception as wait_e:
+                     if self.debug_server: print(f">>> DEBUG: Error waiting for process {pid} termination: {wait_e}")
+
+                print(f"kill_server: Server process (PID {pid}) killed.")
+            elif self._process:
+                 if self.debug_server: print(f">>> DEBUG: Server process (PID {self._process.pid}) already terminated (poll result: {self._process.poll()}).")
+            else:
+                 if self.debug_server: print(">>> DEBUG: No server process handle to kill.")
+
         except Exception as e:
-            print(f"kill_server: Warning: {str(e)}")
+            print(f"kill_server: Warning during kill: {str(e)}")
         finally:
+            if self.debug_server: print(">>> DEBUG: Clearing process handle and singleton instance in finally block.")
             self._process = None
             LlamaServerConnector._instance = None
             print("kill_server: Cleanup complete.")
@@ -285,9 +371,9 @@ if __name__ == "__main__":
     # Initialize the server with configuration from config.json
     connector = LlamaServerConnector(
         config_path="config/models.json",
-        model_key="DEEPSEEK-R1-QWEN-14B",  # Specify the model key from config
+        model_key="GEMMA3_12B",  # Specify the model key from config
         param_overrides={
-            "TEMPERATURE": 0.5,
+            "TEMPERATURE": 0.2,
             "NUM_TOKENS_TO_OUTPUT": 32000
         }
     )

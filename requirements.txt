@@ -1,2 +1,4 @@
 requests
 openai
+fastapi
+uvicorn[standard]
