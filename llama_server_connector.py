@@ -409,7 +409,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug-server", action='store_true', help="Enable server debug prints.")
 
     # Argument for the prompt
-    parser.add_argument("--prompt", type=str, required=True, help="The prompt to send to the model.")
+    parser.add_argument("--prompt", type=str, required=False, default=None, help="Optional prompt to send to the model for a single interaction (Direct Mode). If omitted, the server starts and runs until interrupted (Server Mode).")
     
     args = parser.parse_args()
 
@@ -419,6 +419,7 @@ if __name__ == "__main__":
     connector = None # Initialize connector to None for error handling
     try:
         # Initialize the server with configuration from command line args
+        # This happens regardless of mode, as server startup is common
         connector = LlamaServerConnector(
             config_path=args.config_path,
             model_key=args.model_key,
@@ -433,21 +434,34 @@ if __name__ == "__main__":
         # Get the server URL (just for information)
         server_url = connector.get_server_url()
         print(f"Server URL: {server_url}")
-        
-        # Use the integrated method to get a response
-        print(f"Sending prompt: '{args.prompt}'")
-        response = connector.get_response(args.prompt)
-        print(f"Response: {response}")
-        
-        # Server kill is handled by atexit registration in __init__
 
+        # Decide mode based on prompt presence
+        if args.prompt:
+            # Direct Mode: Send prompt, get response, then exit (atexit handles cleanup)
+            print(f"\nRunning in Direct Mode...")
+            print(f"Sending prompt: '{args.prompt}'")
+            response = connector.get_response(args.prompt)
+            print(f"\nResponse:\n{response}")
+            print("Direct mode finished. Server will shut down.")
+        else:
+            # Server Mode: Keep script running until interrupted
+            print(f"\nRunning in Server Mode. Server is active.")
+            print("Press Ctrl+C to shut down the server.")
+            try:
+                while True:
+                    time.sleep(1) # Keep the main thread alive
+            except KeyboardInterrupt:
+                print("\nCtrl+C detected. Shutting down server...")
+                # atexit handler will call kill_server() automatically
+        
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"\nAn error occurred: {e}")
         # Attempt cleanup if connector was partially initialized and process started
-        if connector is not None and connector._process is not None and connector._process.poll() is None:
+        # Check if connector and _process exist and if process is still running
+        if connector is not None and hasattr(connector, '_process') and connector._process is not None and connector._process.poll() is None:
             print("Attempting to clean up server process due to error...")
             connector.kill_server()
         else:
             print("Exiting due to error.")
 
-    # Note: atexit handles the final cleanup if the script exits normally after successful init
+    # Note: atexit handles the final cleanup if the script exits normally or via Ctrl+C after successful init
