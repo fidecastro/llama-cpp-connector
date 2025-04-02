@@ -6,6 +6,7 @@ import os
 import openai
 from typing import Dict, List, Any, Optional
 import atexit
+import argparse
 
 class LlamaServerConnector:
     """
@@ -365,26 +366,88 @@ class LlamaServerConnector:
             print(f"Error communicating with llm server: {str(e)}")
             return None
 
+# Helper function to parse parameter overrides from command line
+def parse_param_overrides(overrides_list: Optional[List[str]]) -> Dict[str, Any]:
+    """Parses key=value pairs from a list into a dictionary."""
+    overrides = {}
+    if overrides_list:
+        for item in overrides_list:
+            try:
+                key, value_str = item.split('=', 1)
+                key = key.strip()
+                value_str = value_str.strip()
+                # Attempt to convert value to appropriate type (int, float, bool, str)
+                try:
+                    value = int(value_str)
+                except ValueError:
+                    try:
+                        value = float(value_str)
+                    except ValueError:
+                        if value_str.lower() == 'true':
+                            value = True
+                        elif value_str.lower() == 'false':
+                            value = False
+                        else:
+                            value = value_str # Keep as string if no other type matches
+                overrides[key] = value
+            except ValueError:
+                print(f"Warning: Could not parse override '{item}'. Expected format KEY=VALUE. Skipping.")
+    return overrides
 
-# Example usage
+# Example usage with argparse
 if __name__ == "__main__":
-    # Initialize the server with configuration from config.json
-    connector = LlamaServerConnector(
-        config_path="config/models.json",
-        model_key="GEMMA3_12B",  # Specify the model key from config
-        param_overrides={
-            "TEMPERATURE": 0.2,
-            "NUM_TOKENS_TO_OUTPUT": 32000
-        }
-    )
+    parser = argparse.ArgumentParser(description="Run LlamaServerConnector with command-line arguments.")
     
-    # Get the server URL (just for information)
-    server_url = connector.get_server_url()
-    print(f"Server URL: {server_url}")
+    # Arguments for LlamaServerConnector initialization
+    parser.add_argument("--config-path", type=str, default="config/models.json", help="Path to the configuration JSON file.")
+    parser.add_argument("--model-key", type=str, default=None, help="Key of the model to use from config. If None, uses the first non-vision model.")
+    parser.add_argument("--override", action='append', help="Parameter overrides for the model config (e.g., --override TEMPERATURE=0.5 --override NUM_TOKENS_TO_OUTPUT=100).")
+    parser.add_argument("--initial-port", type=int, default=8080, help="Initial port to try for the server.")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address for the server.")
+    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum connection attempts.")
+    parser.add_argument("--attempt-delay", type=int, default=1, help="Delay between connection attempts.")
+    parser.add_argument("--debug-server", action='store_true', help="Enable server debug prints.")
+
+    # Argument for the prompt
+    parser.add_argument("--prompt", type=str, required=True, help="The prompt to send to the model.")
     
-    # Use the integrated method to get a response
-    response = connector.get_response("Hello, how are you?")
-    print(f"Response: {response}")
+    args = parser.parse_args()
+
+    # Parse overrides from the collected list
+    param_overrides = parse_param_overrides(args.override)
     
-    # When done, kill the server
-    connector.kill_server()
+    connector = None # Initialize connector to None for error handling
+    try:
+        # Initialize the server with configuration from command line args
+        connector = LlamaServerConnector(
+            config_path=args.config_path,
+            model_key=args.model_key,
+            param_overrides=param_overrides,
+            initial_port=args.initial_port,
+            host=args.host,
+            max_attempts=args.max_attempts,
+            attempt_delay=args.attempt_delay,
+            debug_server=args.debug_server
+        )
+        
+        # Get the server URL (just for information)
+        server_url = connector.get_server_url()
+        print(f"Server URL: {server_url}")
+        
+        # Use the integrated method to get a response
+        print(f"Sending prompt: '{args.prompt}'")
+        response = connector.get_response(args.prompt)
+        print(f"Response: {response}")
+        
+        # Server kill is handled by atexit registration in __init__
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        # Attempt cleanup if connector was partially initialized and process started
+        if connector is not None and connector._process is not None and connector._process.poll() is None:
+            print("Attempting to clean up server process due to error...")
+            connector.kill_server()
+        else:
+            print("Exiting due to error.")
+
+    # Note: atexit handles the final cleanup if the script exits normally after successful init
