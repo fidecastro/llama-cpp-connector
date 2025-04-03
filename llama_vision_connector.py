@@ -12,11 +12,15 @@ import shutil
 import sys
 import requests
 import argparse
+from pydantic import BaseModel, Field, ValidationError
+import select # For non-blocking reads
+import fcntl # For non-blocking reads
+import threading # <-- Import threading
 
 # --- FastAPI / Server Imports ---
 # Wrap in try-except to allow running without FastAPI installed if server isn't started
 try:
-    from fastapi import FastAPI, HTTPException, Body
+    from fastapi import FastAPI, HTTPException, Body, Request
     from pydantic import BaseModel, Field
     import uvicorn
     FASTAPI_AVAILABLE = True
@@ -70,6 +74,10 @@ if FASTAPI_AVAILABLE:
         choices: List[ChatCompletionChoice]
         usage: Usage
         system_fingerprint: Optional[str] = None
+
+    class ModelsList(BaseModel):
+        object: str
+        data: List[Dict[str, Any]]
 # --- End Pydantic Models ---
 
 
@@ -449,8 +457,7 @@ class LlamaVisionConnector:
         """
         Processes OpenAI-formatted multimodal input and returns a response dictionary
         in the OpenAI ChatCompletion format.
-        This method can be called directly within a Python script OR it is the
-        underlying logic used by the optional FastAPI server endpoint.
+        Raises HTTPException(400) if no image_url is found in the user message.
 
         Args:
             messages: A list of message dictionaries (OpenAI format).
@@ -461,20 +468,40 @@ class LlamaVisionConnector:
         text_prompt = ""
         image_data_url = None
 
-        # 1. Parse input messages
+        # 1. Parse input messages to find text prompt and image url
+        print("--> [Server Process] Parsing messages in get_openai_response...")
+        user_message_content = None
         for message in messages:
             if message.get("role") == "user":
-                if isinstance(message.get("content"), list):
-                    for item in message["content"]:
-                        if item.get("type") == "text":
-                            text_prompt += item.get("text", "") + "\n"
-                        elif item.get("type") == "image_url":
-                            image_data_url = item.get("image_url", {}).get("url")
-                elif isinstance(message.get("content"), str): # Handle text-only user message?
-                     text_prompt += message["content"] + "\n"
+                user_message_content = message.get("content")
+                break # Assuming only one user message block contains the multimodal input
 
+        if isinstance(user_message_content, list):
+            print("--> [Server Process] User message content is a list. Processing items...")
+            for item in user_message_content:
+                if item.get("type") == "text":
+                    text_prompt += item.get("text", "") + "\n"
+                elif item.get("type") == "image_url":
+                    image_data_url = item.get("image_url", {}).get("url")
+        elif isinstance(user_message_content, str):
+             # Handle case where content might just be a string (Open-WebUI post-processing?)
+             print("--> [Server Process] User message content is a string. Assuming text-only.")
+             text_prompt = user_message_content # Use the string as prompt
+             # image_data_url remains None
 
         text_prompt = text_prompt.strip()
+        print(f"--> [Server Process] Parsed text_prompt (len: {len(text_prompt)}): '{text_prompt[:100]}...'")
+        print(f"--> [Server Process] Parsed image_data_url is {'set' if image_data_url else 'None'}")
+
+        # --- Check if image_data_url was actually found --- #
+        if not image_data_url:
+            print("--> [Server Process] ERROR: No image_data_url found. Raising 400.")
+            raise HTTPException(
+                 status_code=400,
+                 detail="Request failed: No image_url found in user message content. This endpoint requires multimodal input."
+            )
+        # --- End Check --- #
+
         if not text_prompt:
             # Use default if no specific prompt given
              if "DEFAULT_PROMPT" in self.model_config:
@@ -500,15 +527,18 @@ class LlamaVisionConnector:
         image_bytes = base64.b64decode(base64_data)
 
         temp_image_file = None
+        temp_image_path = ""
         try:
             # 3. Save image temporarily
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{image_format}") as temp_file:
                 temp_file.write(image_bytes)
                 temp_image_path = temp_file.name
-            print(f"Temporary image saved to: {temp_image_path}") # Debugging
+            print(f"--> [Server Process] Temporary image saved to: {temp_image_path}")
 
             # 4. Execute CLI using the helper method
+            print("--> [Server Process] Calling _run_cli...")
             cli_output_text = await self._run_cli(temp_image_path, text_prompt)
+            print(f"--> [Server Process] _run_cli finished. Output length: {len(cli_output_text)}")
 
             # 5. Format Output
             response_id = f"chatcmpl-vision-{uuid.uuid4()}"
@@ -536,18 +566,21 @@ class LlamaVisionConnector:
                     "total_tokens": None
                 }
             }
+            print("--> [Server Process] Formatting OpenAI response...")
             return openai_response
 
-        except Exception as e:
-             print(f"Error during OpenAI-compatible vision processing: {e}")
-             # Re-raise or return an error structure
+        except HTTPException: # Re-raise HTTPExceptions directly
              raise
+        except Exception as e:
+             print(f"--> [Server Process] Error during OpenAI-compatible vision processing: {e}")
+             # Raise as 500 for unexpected errors during processing
+             raise HTTPException(status_code=500, detail=f"Internal server error during vision processing: {e}")
         finally:
             # 6. Cleanup Temporary File
-            if 'temp_image_path' in locals() and os.path.exists(temp_image_path):
+            if temp_image_path and os.path.exists(temp_image_path):
                 try:
                     os.remove(temp_image_path)
-                    print(f"Temporary image deleted: {temp_image_path}") # Debugging
+                    print(f"--> [Server Process] Cleaned up temp image: {temp_image_path}")
                 except OSError as e:
                     print(f"Error deleting temporary file {temp_image_path}: {e}")
 
@@ -589,41 +622,94 @@ class LlamaVisionConnector:
                   summary="Handle Multimodal Chat Completion Request",
                   tags=["Chat"])
         async def handle_chat_completion(
-            request: ChatCompletionRequest = Body(...) # Use Pydantic model for validation
+            body: dict = Body(...), # Accept raw dict first
+            raw_request: Request = None
         ):
             """
             Accepts OpenAI-compatible chat completion requests with multimodal content.
             Processes the request using the configured llama.cpp vision model CLI.
             """
-            print(f"Received request for model: {request.model or 'default'}")
-            # Optional: Check if request.model matches self.model_key if provided
-            if request.model and request.model != self.model_key:
-                 # Behavior if model mismatch: reject or just log?
-                 print(f"Warning: Request specified model '{request.model}', but connector is using '{self.model_key}'. Processing with connector's model.")
-                 # raise HTTPException(status_code=400, detail=f"Model mismatch: Server configured for '{self.model_key}', request specified '{request.model}'")
+            print("--> [Server Process] Entered handle_chat_completion")
+            # --- DEBUG: Print the raw body received by FastAPI ---
+            print("--> [Server Process] Raw Dict Body Received by FastAPI:")
+            import json
+            print(json.dumps(body, indent=2))
+            # print("--- End Raw Dict Body ---") # REMOVED for brevity
+            # --- END DEBUG ---
 
-
+            # --- Manually Validate with Pydantic ---
+            request_payload = None # Initialize
             try:
-                # Convert Pydantic messages back to dicts for get_openai_response if needed
-                # Or adjust get_openai_response to accept Pydantic models directly
-                messages_dict_list = [msg.dict() for msg in request.messages]
+                print("--> [Server Process] Attempting Pydantic validation...")
+                request_payload = ChatCompletionRequest(**body)
+                print("--> [Server Process] Pydantic validation successful.")
+            except ValidationError as e:
+                print("!!! [Server Process] Pydantic Validation Error !!!")
+                print(e.json(indent=2))
+                raise HTTPException(status_code=422, detail=e.errors())
+            except Exception as e:
+                 print(f"--> [Server Process] Error during manual Pydantic validation: {e}")
+                 raise HTTPException(status_code=400, detail=f"Error processing request body: {e}")
+            # --- END Manual Validation ---
 
+            print(f"--> [Server Process] Received request for model: {request_payload.model or 'default'}")
+
+            response_dict = None # Initialize
+            try:
+                # Convert Pydantic messages back to dicts for get_openai_response
+                messages_dict_list = [msg.dict() for msg in request_payload.messages]
+
+                print("--> [Server Process] Calling get_openai_response...")
                 response_dict = await self.get_openai_response(messages=messages_dict_list)
-                # If using Pydantic response model: return ChatCompletionResponse(**response_dict)
-                return response_dict
+                print("--> [Server Process] get_openai_response finished.")
+
             except (ValueError, FileNotFoundError) as e:
-                print(f"Input Error: {e}")
+                print(f"--> [Server Process] Input Error: {e}")
                 raise HTTPException(status_code=400, detail=str(e))
             except RuntimeError as e:
-                print(f"Runtime Error: {e}")
-                # Runtime error often means the backend CLI failed
+                print(f"--> [Server Process] Runtime Error: {e}")
                 raise HTTPException(status_code=500, detail=f"Backend CLI execution failed: {e}")
             except Exception as e:
-                # Catch-all for unexpected errors
-                print(f"Unexpected Server Error: {e}")
+                print(f"--> [Server Process] Unexpected Server Error: {e}")
                 raise HTTPException(status_code=500, detail=f"An internal server error occurred: {e}")
 
-        # --- Add other endpoints if needed (e.g., health check, model list) ---
+            print("--> [Server Process] Returning response.")
+            return response_dict
+
+        # --- Add endpoint for listing models ---
+        @app.get("/v1/models",
+                 # response_model=ModelsList, # Optional: Define Pydantic model for response
+                 summary="List Available Models",
+                 tags=["Management"])
+        async def list_models():
+            """
+            Provides information about the currently loaded model, mirroring
+            the format used by llama-server's /v1/models endpoint (without metadata).
+            """
+            if not self.model_config or "MODEL_PATH" not in self.model_config:
+                raise HTTPException(status_code=500, detail="Model configuration not loaded properly.")
+
+            # Use the model path as the ID, consistent with the user's example output
+            model_id_to_use = self.model_config.get("MODEL_PATH", "unknown")
+            current_time = int(time.time())
+
+            # Construct the response data
+            # We cannot easily get the 'meta' field without parsing the GGUF file
+            model_data = {
+                "id": model_id_to_use,
+                "object": "model",
+                "created": current_time,
+                "owned_by": "LlamaVisionConnector" # Indicate the owner
+                # "meta": {} # Omitting meta field
+            }
+
+            response = {
+                "object": "list",
+                "data": [model_data]
+            }
+            return response
+
+        # --- Add other endpoints if needed (e.g., health check) ---
         @app.get("/health", summary="Health Check", tags=["Management"])
         async def health_check():
             return {"status": "ok", "model_key": self.model_key}
@@ -936,11 +1022,36 @@ class LlamaVisionConnector:
 # ========================================================================
 # --- Example Usage (`if __name__ == "__main__":`) ---
 
-# ... (run_direct_call_example remains the same) ...
+async def run_direct_call_example(image_path):
+    print(f"Running direct call example for image: {image_path}")
+    # Placeholder - replace with actual example logic if needed
+    connector = LlamaVisionConnector(auto_start=False) # Init for direct use
+    try:
+        response = await connector.get_response(image_path=image_path)
+        print("\n--- Direct Call Response ---")
+        print(response)
+        print("--- End Direct Call Response ---")
+    except Exception as e:
+        print(f"Error during direct call: {e}")
+    # pass
 
-# Remove old run_server_example
-# def run_server_example(host: str, port: int, model_key: Optional[str]):
-#    ...
+# --- Function to continuously read and print from a pipe ---
+def pipe_reader(pipe, prefix, stop_event):
+    try:
+        # Use iter(pipe.readline, '') for line-by-line reading with text=True
+        for line in iter(pipe.readline, ''):
+            if stop_event.is_set():
+                break
+            if line:
+                # line is already a string because text=True was used in Popen
+                print(f"{prefix}: {line.strip()}")
+    except Exception as e:
+        # Pipe might close unexpectedly when process terminates
+        if not stop_event.is_set(): # Avoid printing error if we stopped it
+             print(f"Error reading from {prefix} pipe: {e}")
+    finally:
+        # print(f"{prefix} reader thread finished.") # Optional debug
+        pass
 
 if __name__ == "__main__":
     import argparse
@@ -1048,10 +1159,12 @@ if __name__ == "__main__":
         print(f"Server Host: {args.host}")
         print(f"Server Port: {args.port}")
         print(f"Auto-Starting Server Process: {not args.no_auto_start}")
-        manager_connector = None # Define outside try for use in finally block if needed
+        manager_connector = None
+        stdout_thread = None
+        stderr_thread = None
+        stop_reader_event = threading.Event()
+
         try:
-            # Initialize connector. If auto_start=True (default), it will call
-            # start_server_process() to launch the background server.
             manager_connector = LlamaVisionConnector(
                 config_path=args.config,
                 model_key=args.model_key,
@@ -1068,35 +1181,66 @@ if __name__ == "__main__":
                       "You can start it manually via connector.start_server_process().",
                       "Use Ctrl+C to exit manager.")
 
-            # Keep the main manager script alive.
-            # The actual server runs in the background subprocess.
-            # The atexit handler (registered in __init__) will attempt to kill
-            # the server process when this manager script exits.
-            print("Main script is now running in management mode. It will keep the server alive (if started)",
-                   "and handle cleanup on exit (e.g., via Ctrl+C).")
-            while True:
-                # Keep main thread alive. Could potentially add interactive commands here later.
-                time.sleep(3600) # Sleep for a long time
+            print("Main script is now running in management mode. Monitoring server process...")
 
+            if manager_connector and hasattr(manager_connector, '_server_process') and manager_connector._server_process:
+                server_proc = manager_connector._server_process
+
+                # --- Start separate threads for reading stdout and stderr --- #
+                print("Starting pipe reader threads...")
+                stdout_thread = threading.Thread(
+                    target=pipe_reader,
+                    args=(server_proc.stdout, "[Server STDOUT]", stop_reader_event),
+                    daemon=True # Allows main thread to exit even if these are running
+                )
+                stderr_thread = threading.Thread(
+                    target=pipe_reader,
+                    args=(server_proc.stderr, "[Server STDERR]", stop_reader_event),
+                    daemon=True
+                )
+                stdout_thread.start()
+                stderr_thread.start()
+                # --- End starting threads --- #
+
+                # Main thread now just waits for process termination or KeyboardInterrupt
+                while server_proc.poll() is None:
+                    try:
+                        # Sleep briefly to avoid busy-waiting
+                        time.sleep(0.5)
+                    except KeyboardInterrupt:
+                        print("\nCtrl+C received by main thread. Initiating shutdown...")
+                        # Signal reader threads to stop (optional, as they are daemons)
+                        stop_reader_event.set()
+                        # Let atexit handle killing the server process
+                        raise # Re-raise KeyboardInterrupt to exit gracefully
+
+                # Process finished, signal threads and wait briefly for them
+                print(f"\n--- Server process (PID: {server_proc.pid}) terminated with code: {server_proc.poll()} ---")
+                stop_reader_event.set()
+                # Give threads a moment to finish reading any final output
+                if stdout_thread: stdout_thread.join(timeout=1.0)
+                if stderr_thread: stderr_thread.join(timeout=1.0)
+                print("Pipe reader threads signaled to stop.")
+
+            else:
+                print("ERROR: Server process handle not found after initialization. Cannot monitor.")
+                while True:
+                     try:
+                          time.sleep(3600)
+                     except KeyboardInterrupt:
+                          print("\nCtrl+C received. Exiting.")
+                          break
         except KeyboardInterrupt:
-            print("\nCtrl+C received. Exiting server management mode...")
-            # atexit handler should automatically call kill_server if connector was initialized
+             # This catches Ctrl+C if it happens before the main monitoring loop starts
+             print("\nCtrl+C received during setup. Exiting server management mode...")
         except Exception as e:
             print(f"ERROR in server management mode: {e.__class__.__name__}: {e}", file=sys.stderr)
-            # Ensure cleanup is attempted even if initialization failed partially
-            # if manager_connector: manager_connector.kill_server()
+            if stop_reader_event: stop_reader_event.set() # Signal threads on error too
             sys.exit(1)
         finally:
-             # Explicitly attempt cleanup in case atexit doesn't run (e.g., fatal error)
-             # Note: atexit should normally handle this.
-             # if manager_connector:
-             #      print("Ensuring server process is stopped in finally block...")
-             #      manager_connector.kill_server()
-             pass # Relying on atexit primarily
-
-    # This else should not be reachable due to argparse setup
-    # else:
-    #      print(f"Error: Invalid mode '{args.mode}'.", file=sys.stderr)
-    #      sys.exit(1)
+            # Ensure threads are signaled to stop if main loop exited unexpectedly
+            if stop_reader_event: stop_reader_event.set()
+            # Rely on atexit for final server process kill
+            print("Exiting management mode.")
 
     print("\n--- Script Finished --- ({args.mode} mode)")

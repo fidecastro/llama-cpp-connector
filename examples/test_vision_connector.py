@@ -3,7 +3,8 @@ import asyncio
 import os
 import base64
 import sys
-import requests # Needed for server test
+# import requests # No longer needed for server test
+import httpx    # <-- Import httpx
 import time     # Needed for server test delay
 
 # Add the root directory to Python path
@@ -67,52 +68,53 @@ async def test_direct_vision():
         print(f"Error during direct vision testing: {e}")
     # No cleanup needed here as server wasn't started
 
-async def test_vision_server():
-    """Test vision model interaction through the auto-started FastAPI server"""
-    print("\n=== Testing Vision Model via Auto-Started FastAPI Server ===")
+async def test_vision_server_external():
+    """Test vision model interaction by connecting to an EXTERNALLY started server"""
+    print("\n=== Testing Vision Model via EXTERNALLY Started FastAPI Server ===")
 
-    # Initialize connector WITH auto-starting server
-    # The connector instance will manage the server process lifecycle
-    connector = LlamaVisionConnector(
-        config_path="config/models.json",  # Path relative to root
-        model_key=None,  # Will use first vision model
-        auto_start=True, # Start the server process
-        server_host="127.0.0.1",
-        server_port=8001, # Initial port, connector finds available one
-        debug_server=True # Enable debug prints for server part of test
-    )
+    # Configuration (matching default server settings)
+    SERVER_HOST = "127.0.0.1"
+    SERVER_PORT = 8001
+    # You might need to load config just to get the model key, or hardcode it for test
+    # For simplicity, let's assume a default model or retrieve from config if needed
+    # This connector instance is NOT used to manage the server, only potentially for config
+    temp_connector_for_config = LlamaVisionConnector(config_path="config/models.json", auto_start=False)
+    test_model_key = temp_connector_for_config.model_key # Get the default model key
+    del temp_connector_for_config # Don't need this instance anymore
 
-    # Note: connector.kill_server() will be called automatically on exit via atexit
+    server_url = f"http://{SERVER_HOST}:{SERVER_PORT}/v1/chat/completions"
+    health_url = f"http://{SERVER_HOST}:{SERVER_PORT}/health"
+
+    print(f"Target server endpoint: {server_url}")
+    print("!!! IMPORTANT: Ensure the LlamaVisionConnector server is running externally: !!!")
+    print(f"!!! `python llama_vision_connector.py server --port {SERVER_PORT}` !!!")
 
     try:
-        # Wait briefly for server to initialize (connector already does basic checks)
-        print("Waiting a moment for server to fully initialize...")
-        await asyncio.sleep(5) # Increased wait time
-
-        # Check if the server process managed by the connector is running
-        if connector.is_server_running(timeout=2.0):
-            print("Server process appears to be running.")
-            server_url = f"http://{connector.server_host}:{connector.server_port}/v1/chat/completions"
-            print(f"Attempting to connect to server endpoint: {server_url}")
-        else:
-            print("Error: Server process failed to start or is not responding after wait. Check logs.")
-            # Attempt to kill any lingering process just in case
-            connector.kill_server()
-            return
+        # Optional: Check health endpoint first to see if server is reachable
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                health_response = await client.get(health_url)
+                health_response.raise_for_status()
+                print(f"Health check OK (Status: {health_response.status_code})")
+            except (httpx.RequestError, httpx.HTTPStatusError) as health_err:
+                print(f"\nError: Could not connect to or get valid health check from {health_url}")
+                print(f"Details: {health_err}")
+                print("Please ensure the server is running externally before running this test.")
+                return
 
         image_path = get_test_image_path()
         if not os.path.exists(image_path):
-            print(f"Error: Test image not found at {image_path}. Skipping server test.")
-            return
+             print(f"Error: Test image not found at {image_path}. Skipping server test.")
+             return
 
-        # Read and encode the image for the OpenAI format
+        # Read and encode the image
         with open(image_path, "rb") as image_file:
             image_data = base64.b64encode(image_file.read()).decode('utf-8')
             image_url_data = f"data:image/jpeg;base64,{image_data}"
 
-        # Prepare OpenAI-compatible request payload
+        # Prepare request payload
         request_data = {
-            "model": connector.model_key, # Use the model key from the connector
+            "model": test_model_key, # Use the retrieved model key
             "messages": [
                 {
                     "role": "user",
@@ -129,50 +131,72 @@ async def test_vision_server():
                         }
                     ]
                 }
-            ],
-            # Add other params if needed, matching server expectations or OpenAI spec
-            # "temperature": 0.7,
-            # "max_tokens": 100
+            ]
         }
 
-        print("\nSending request to server...")
-        # Use requests library to send the POST request (sync call in async context)
-        response = await asyncio.to_thread(requests.post, server_url, json=request_data, timeout=60)
+        print(f"\n[{time.strftime('%H:%M:%S')}] Sending request to external server via httpx...")
+        start_time = time.monotonic()
+        response = None
+        try:
+            # Use httpx.AsyncClient for the request (timeout can likely be shorter now)
+            async with httpx.AsyncClient(timeout=60.0) as client: # Reduced timeout to 60s
+                 response = await client.post(server_url, json=request_data)
 
-        print(f"Server Response Status Code: {response.status_code}")
+            # Process response (moved outside the try/except for client call)
+            end_time = time.monotonic()
+            print(f"[{time.strftime('%H:%M:%S')}] Request finished. Duration: {end_time - start_time:.2f}s")
+            print(f"Server Response Status Code: {response.status_code}")
 
-        if response.status_code == 200:
+            # Check status code *after* getting the response
+            response.raise_for_status() # Raise exception for 4xx/5xx errors
+
             print("\nServer Response JSON:")
-            try:
-                print(response.json())
-            except requests.exceptions.JSONDecodeError:
-                print("Error: Could not decode JSON response from server.")
-                print("Raw Response Text:", response.text)
-        else:
-            print("\nError: Server returned non-200 status code.")
-            print("Response Text:", response.text)
+            print(response.json())
+
+        except httpx.ReadTimeout as timeout_err:
+             end_time = time.monotonic()
+             print(f"\n!!! [{time.strftime('%H:%M:%S')}] Request TIMED OUT via httpx after {end_time - start_time:.2f}s !!!")
+             print(f"Error details: {timeout_err}")
+        except httpx.HTTPStatusError as status_err:
+             # Handle non-2xx responses caught by raise_for_status()
+             end_time = time.monotonic()
+             print(f"\n!!! [{time.strftime('%H:%M:%S')}] Request FAILED (HTTP Status {status_err.response.status_code}) via httpx after {end_time - start_time:.2f}s !!!")
+             print(f"Response body: {status_err.response.text}")
+        except httpx.RequestError as req_err:
+             # Handle other httpx request errors (connection issues etc.)
+             end_time = time.monotonic()
+             print(f"\n!!! [{time.strftime('%H:%M:%S')}] Request FAILED (Request Error) via httpx after {end_time - start_time:.2f}s !!!")
+             print(f"Error details: {req_err}")
+             import traceback
+             traceback.print_exc()
+        # Keep the generic Exception catch for other potential errors
+        except Exception as req_err:
+             end_time = time.monotonic()
+             print(f"\n!!! [{time.strftime('%H:%M:%S')}] Request FAILED (Generic Error) via httpx after {end_time - start_time:.2f}s !!!")
+             print(f"Error details: {req_err}")
+             import traceback
+             traceback.print_exc()
 
     except Exception as e:
-        print(f"An error occurred during server testing: {e}")
+        print(f"An error occurred during external server testing setup: {e}")
         import traceback
-        traceback.print_exc() # Print stack trace for debugging
+        traceback.print_exc()
 
-    # No explicit connector.kill_server() needed here because of atexit registration
-    print("\nServer test finished. Server process should shut down automatically on script exit.")
-
+    print("\nExternal server test finished.")
 
 async def main():
     """Main test function"""
     # Test direct vision interaction (calls CLI directly)
+    print("\n--- Running Direct Call Test --- ")
     await test_direct_vision()
+    print("--- Direct Call Test Finished ---")
 
-    # Reset the singleton instance before the server test
-    print("\nResetting LlamaVisionConnector singleton for server test...")
-    LlamaVisionConnector._instance = None
-    LlamaVisionConnector._server_process = None # Also ensure the process handle is cleared
+    # NOTE: No singleton reset needed as we are not managing the server process
 
-    # Test server mode (starts FastAPI server, sends HTTP request)
-    await test_vision_server()
+    # Test connection to an EXTERNAL server process
+    print("\n--- Running External Server Connection Test --- ")
+    await test_vision_server_external()
+    print("--- External Server Connection Test Finished ---")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
