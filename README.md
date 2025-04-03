@@ -291,6 +291,18 @@ Mount your models directory:
 docker run --gpus all -v /path/to/your/models:/workspace/models -it llama-cpp-connector:latest
 ```
 
+## Using with Open WebUI
+
+It's super simple to connect either connector (server or vision) to Open WebUI:
+
+1. Compile the container for llama-cpp-connector as usual.
+2. Run `pip install open-webui` inside the container.
+3. Run either `python llama_server_connector.py` (for text models), or `python llama_vision_connector.py server` (for vision models). 
+4. Run `open-webui serve --port 3000` in a terminal inside the container.
+5. Log in to the Open WebUI HTTP page (in 127.0.0.1:3000) > Settings > Admin Settings > disable all connections but OpenAI API, and set it to point to `http://localhost:8080/v1` (for llama_server_connector) or `http://localhost:8001/v1` (for llama_vision_connector); also add a dummy API key ("not-needed")
+
+This provides a complete UI for interacting with your local models through a familiar chat interface.
+
 ## Why llama-cpp-connector?
 
 - **Simplified integration**: No need to directly interface with llama.cpp's C++ code
