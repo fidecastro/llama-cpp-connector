@@ -365,6 +365,7 @@ class LlamaVisionConnector:
         """
         cmd = [self.model_config["CLI_CMD"]]
         cmd.extend(["-m", self.model_config["MODEL_PATH"]])
+        cmd.extend(["-fa", "-sm", "row"])
         if "MMPROJ_PATH" in self.model_config:
             cmd.extend(["--mmproj", self.model_config["MMPROJ_PATH"]])
         # Add other relevant parameters from config
