@@ -13,7 +13,7 @@ The idea behind it is simple: to offer a minimalistic environment for Python cod
 - 🚀 **Easy to use**: Just two main Python classes to interact with local LLMs: `LlamaServerConnector` and `LlamaVisionConnector`.
 - 🖼️ **Vision model support**: Specifically handles vision models like Gemma 3, Qwen2-VL, and QVQ using their dedicated CLI tools.
 - 🔄 **OpenAI-compatible API (Text Models)**: The `LlamaServerConnector` manages a standard `llama-server` process, providing an OpenAI-compatible endpoint (`/v1/...`) for text models.
-- 👁️ **OpenAI-compatible API (Vision Models - Experimental)**: The `LlamaVisionConnector` can *optionally* run an internal FastAPI server (`auto_start=True`) providing an OpenAI-compatible `/v1/chat/completions` endpoint that accepts multimodal requests (text + image URLs). This internally calls the vision CLI tool.
+- 👁️ **OpenAI-compatible API (Vision Models)**: The `LlamaVisionConnector` can *optionally* run an internal FastAPI server (`auto_start=True`) providing an OpenAI-compatible `/v1/chat/completions` endpoint that accepts multimodal requests (text + image URLs). This internally calls the vision CLI tool.
 - ⚙️ **Configurable**: Simple JSON-based configuration (`config/models.json`) for all model parameters (paths, CLI command, GPU layers, temperature, etc.).
 - 🛠️ **Server Management**: Connectors handle starting, stopping, and finding available ports for the underlying `llama-server` or internal FastAPI server processes.
 - 🐳 **Docker Ready**: Build once, prepare your container, run `docker commit` and your LLM-powered app is done.
