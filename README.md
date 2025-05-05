@@ -34,7 +34,7 @@ This component provides an OpenAI-compatible server interface for text-based mod
 
 ### 2. LlamaVisionConnector (`llama_vision_connector.py`)
 
-Interacts with **multimodal vision models** using their specific CLI tools (e.g., `llama-gemma3-cli`, `llama-qwen2vl-cli`).
+Interacts with **multimodal vision models** using their specific CLI tools (e.g., `llama-mtmd-cli`).
 
 - **Direct Mode:** Provides an async `get_response(image_path, prompt)` method that directly runs the configured CLI tool (specified in `config/models.json`) with the image and prompt, parsing the text output.
 - **Server Mode (Optional):** If initialized with `auto_start=True`, it runs its *own* internal FastAPI/Uvicorn server process.
@@ -63,7 +63,7 @@ Central JSON file to define model settings.
         },
         "MY_VISION_MODEL": {
             // Parameters for LlamaVisionConnector (CLI tool)
-            "CLI_CMD": "llama-gemma3-cli", // The specific CLI executable
+            "CLI_CMD": "llama-mtmd-cli", // The specific CLI executable
             "MODEL_PATH": "models/my-vision-model.gguf",
             "MMPROJ_PATH": "models/my-mmproj-model.gguf", // Path to multimodal projector
             "TEMPERATURE": 0.3,
@@ -268,7 +268,7 @@ This provides a complete UI for interacting with your local models through a fam
 *   **`MODELS`**: Dictionary containing configurations for different models, keyed by a unique name.
 *   **Model Entry**: Each model has its own dictionary.
     *   **`MODEL_PATH`**: (Required) Path to the main GGUF model file.
-    *   **`CLI_CMD`**: (Required for Vision Models) The specific llama.cpp CLI executable (e.g., `llama-gemma3-cli`, `llama-qwen2vl-cli`). Used by `LlamaVisionConnector`.
+    *   **`CLI_CMD`**: (Required for Vision Models) The specific llama.cpp CLI executable (e.g., `llama-mtmd-cli`). Used by `LlamaVisionConnector`.
     *   **`MMPROJ_PATH`**: (Required for Vision Models) Path to the multimodal projector file. Used by `LlamaVisionConnector`.
     *   Other parameters are passed either to `llama-server` (by `LlamaServerConnector`) or the specific CLI tool (by `LlamaVisionConnector`). Common examples:
         *   `NUM_LAYERS_TO_GPU` (`-ngl`)
