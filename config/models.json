@@ -4,7 +4,7 @@
     "MODELS": {
         "GEMMA3_12B":
         {
-            "CLI_CMD": "llama-gemma3-cli",
+            "CLI_CMD": "llama-mtmd-cli",
             "MODEL_PATH": "models/gemma-3-12b-it-Q6_K_L.gguf",      
             "MMPROJ_PATH": "models/mmproj-gemma3-12b-it-f32.gguf",
             "CACHE_TYPE_K": "q8_0",
@@ -16,7 +16,7 @@
         },
         "GEMMA3_27B":
         {
-            "CLI_CMD": "llama-gemma3-cli",
+            "CLI_CMD": "llama-mtmd-cli",
             "MODEL_PATH": "models/gemma-3-27b-it-Q4_K_M.gguf",      
             "MMPROJ_PATH": "models/mmproj-gemma3-27b-model-f16.gguf",
             "CACHE_TYPE_K": "q4_0",
@@ -28,7 +28,7 @@
         },
         "QWEN2_VL_7B":
         {
-            "CLI_CMD": "llama-qwen2vl-cli",
+            "CLI_CMD": "llama-mtmd-cli",
             "MODEL_PATH": "models/Qwen2-VL-7B-Instruct-Q8_0.gguf",      
             "MMPROJ_PATH": "models/mmproj-Qwen2-VL-7B-Instruct-f16.gguf",
             "CACHE_TYPE_K": "q8_0",
@@ -50,7 +50,7 @@
             "CHAT_TEMPLATE": "deepseek3"
         },
         "QVQ_72B_PREVIEW": {
-            "CLI_CMD": "llama-qwen2vl-cli",
+            "CLI_CMD": "llama-mtmd-cli",
             "MODEL_PATH": "models/QVQ-72B-Preview-GGUF",      
             "MMPROJ_PATH": "models/mmproj-QVQ-72B-Preview-f16.gguf",
             "CACHE_TYPE_K": "q8_0",

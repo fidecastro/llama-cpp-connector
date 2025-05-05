@@ -11,32 +11,41 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Clone llama.cpp repository instead of copying local files
-RUN git clone https://github.com/ggml-org/llama.cpp.git .
+# Ensure latest code is fetched and submodules are updated
+RUN rm -rf .git && \
+    echo "Cloning latest llama.cpp..." && \
+    git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . && \
+    echo "Updating submodules..." && \
+    git submodule update --init --recursive
 
 # This ARG will be passed at build time
 ARG CUDA_ARCHITECTURES="89"
 
-# Configure build with CUDA architecture passed at build time
-RUN mkdir -p build && \
+# Configure and build llama.cpp
+RUN echo "Configuring and building llama.cpp..." && \
+    mkdir -p build && \
     cd build && \
     cmake .. \
         -DLLAMA_CUDA=ON \
+        # You generally don't need BUILD_SHARED_LIBS=ON for llama.cpp unless you have specific needs
+        # The necessary .so files seem to be built by default now when CUDA is ON.
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
         -DCMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined" && \
     cmake --build . --config Release -j $(nproc)
 
-# Collect build artifacts
-RUN mkdir -p /app/artifacts/libs && \
-    find build -name "*.so*" -exec cp {} /app/artifacts/libs \; && \
-    cp build/bin/* /app/artifacts/
+# --- Final Artifact Collection ---
+# Copy all artifacts from the build/bin directory
+RUN echo "Collecting build artifacts from /app/build/bin/..." && \
+    rm -rf /app/artifacts && \
+    mkdir -p /app/artifacts && \
+    cp -v /app/build/bin/* /app/artifacts/
 
 # Stage 2: Runtime environment
 FROM ${BASE_CUDA_RUN_CONTAINER}
 
 # Install runtime dependencies
 RUN apt-get update && \
-    apt-get install -y libcurl4-openssl-dev libgomp1 python3 python3-pip python3-venv python3-requests && \
+    apt-get install -y libcurl4 libgomp1 python3 python3-pip python3-venv python3-requests && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set up a virtual environment
@@ -54,12 +63,17 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt # Clean up requirements file
 
-# Copy artifacts from build stage
-COPY --from=build /app/artifacts/libs/* /usr/local/lib/
+# --- Final Artifact Copying ---
+# Copy shared libraries (.so) to /usr/local/lib
+COPY --from=build /app/artifacts/*.so* /usr/local/lib/
+# Copy everything else (executables) to /usr/local/bin
 COPY --from=build /app/artifacts/* /usr/local/bin/
+# Clean up any .so files mistakenly copied to /usr/local/bin
+RUN find /usr/local/bin -maxdepth 1 -name '*.so*' -delete
 
-# Set up library path
+# Set up library path and ensure ldconfig recognizes new libs
 ENV LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
+RUN ldconfig
 
 # Create workspace directory structure
 RUN mkdir -p /workspace/config /workspace/models /workspace/examples/test_images
