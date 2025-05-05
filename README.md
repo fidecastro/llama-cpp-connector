@@ -4,7 +4,7 @@ Super simple Python connectors for llama.cpp, including vision models (Gemma 3, 
 
 ## Overview
 
-This project provides lightweight Python connectors to easily interact with llama.cpp models, supporting both standard text models (via `llama-server`) and multimodal vision models (via their specific CLI tools, e.g., `llama-gemma3-cli`). It creates a simple framework to build applications on top of llama.cpp while handling the complexity of model configuration, server management, and basic inference.
+This project provides lightweight Python connectors to easily interact with llama.cpp models, supporting both standard text models (via `llama-server`) and multimodal vision models (via their specific CLI tools, e.g., `llama-mtmd-cli`). It creates a simple framework to build applications on top of llama.cpp while handling the complexity of model configuration, server management, and basic inference.
 
 The idea behind it is simple: to offer a minimalistic environment for Python coders to directly interact with llama.cpp without intermediaries like Ollama or LMStudio. Just go to HuggingFace, download your models, use the connectors and have fun!
 
