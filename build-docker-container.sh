@@ -17,6 +17,7 @@ fi
 # Build the Docker image with the detected architecture
 docker build \
     --build-arg CUDA_ARCHITECTURES="$CUDA_ARCH" \
+    --no-cache \
     -t llama-cpp-connector:latest \
     -f Dockerfile .
 

@@ -1,6 +1,6 @@
 # Stage 1: Build environment
-ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04
-ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
+ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
+ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04
 
 FROM ${BASE_CUDA_DEV_CONTAINER} AS build
 
