@@ -81,7 +81,7 @@ if FASTAPI_AVAILABLE:
 # --- End Pydantic Models ---
 
 
-class LlamaVisionConnector:
+class LlamaCLIConnector:
     """
     Connector for interacting with llama.cpp vision models via their CLI tools.
     Provides methods for direct interaction (`get_response`, `get_openai_response`)
@@ -93,7 +93,7 @@ class LlamaVisionConnector:
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super(LlamaVisionConnector, cls).__new__(cls)
+            cls._instance = super(LlamaCLIConnector, cls).__new__(cls)
         return cls._instance
     
     def __init__(self,
@@ -117,7 +117,7 @@ class LlamaVisionConnector:
         """
         if not hasattr(self, 'initialized'):
             # --- Core Initialization ---
-            print(f"Initializing LlamaVisionConnector...")
+            print(f"Initializing LlamaCLIConnector...")
             self.debug_server = debug_server # STORE the flag
             self.config_path = os.path.abspath(config_path) # Store absolute path
             self._load_config(self.config_path)
@@ -700,7 +700,7 @@ class LlamaVisionConnector:
                 "id": model_id_to_use,
                 "object": "model",
                 "created": current_time,
-                "owned_by": "LlamaVisionConnector" # Indicate the owner
+                "owned_by": "LlamaCLIConnector" # Indicate the owner
                 # "meta": {} # Omitting meta field
             }
 
@@ -816,11 +816,11 @@ class LlamaVisionConnector:
                 print(f"Error during server process termination: {e}")
             finally:
                 self._server_process = None # Clear the handle regardless
-                LlamaVisionConnector._instance = None  # Clear the singleton instance
+                LlamaCLIConnector._instance = None  # Clear the singleton instance
         elif self._server_process:
              print(f"Server process (PID {self._server_process.pid}) already terminated.")
              self._server_process = None # Clear handle if already dead
-             LlamaVisionConnector._instance = None  # Clear the singleton instance
+             LlamaCLIConnector._instance = None  # Clear the singleton instance
         else:
             print("No server process to kill (process handle is None).")
 
@@ -1026,7 +1026,7 @@ class LlamaVisionConnector:
 async def run_direct_call_example(image_path):
     print(f"Running direct call example for image: {image_path}")
     # Placeholder - replace with actual example logic if needed
-    connector = LlamaVisionConnector(auto_start=False) # Init for direct use
+    connector = LlamaCLIConnector(auto_start=False) # Init for direct use
     try:
         response = await connector.get_response(image_path=image_path)
         print("\n--- Direct Call Response ---")
@@ -1115,7 +1115,7 @@ if __name__ == "__main__":
               f" (Host: {args.host}, Port: {args.port}, Config: {args.config}, Model: {args.model_key})")
         try:
             # Initialize connector *without* auto-starting (it IS the server process)
-            internal_connector = LlamaVisionConnector(
+            internal_connector = LlamaCLIConnector(
                 config_path=args.config,
                 model_key=args.model_key,
                 auto_start=False, # Crucial: The subprocess doesn't start another process
@@ -1139,7 +1139,7 @@ if __name__ == "__main__":
         print(f"Test Image Path: {args.image}")
         try:
             # Initialize connector for direct usage (no server process started here)
-            direct_connector = LlamaVisionConnector(
+            direct_connector = LlamaCLIConnector(
                  config_path=args.config,
                  model_key=args.model_key,
                  auto_start=False # Important: Direct mode doesn't manage a server process
@@ -1166,7 +1166,7 @@ if __name__ == "__main__":
         stop_reader_event = threading.Event()
 
         try:
-            manager_connector = LlamaVisionConnector(
+            manager_connector = LlamaCLIConnector(
                 config_path=args.config,
                 model_key=args.model_key,
                 auto_start=(not args.no_auto_start),

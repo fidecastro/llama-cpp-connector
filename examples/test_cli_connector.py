@@ -11,7 +11,7 @@ import time     # Needed for server test delay
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Correct import path
-from llama_vision_connector import LlamaVisionConnector
+from llama_cli_connector import LlamaCLIConnector
 
 def get_test_image_path():
     """Get the path to the test image, relative to the root directory"""
@@ -24,7 +24,7 @@ async def test_direct_vision():
     print("\n=== Testing Direct Vision Model Interaction (using get_response) ===")
 
     # Initialize connector without auto-starting server
-    connector = LlamaVisionConnector(
+    connector = LlamaCLIConnector(
         config_path="config/models.json",  # Path relative to root
         model_key=None,  # Will use first vision model found in config
         auto_start=False # We will call the CLI directly
@@ -78,7 +78,7 @@ async def test_vision_server_external():
     # You might need to load config just to get the model key, or hardcode it for test
     # For simplicity, let's assume a default model or retrieve from config if needed
     # This connector instance is NOT used to manage the server, only potentially for config
-    temp_connector_for_config = LlamaVisionConnector(config_path="config/models.json", auto_start=False)
+    temp_connector_for_config = LlamaCLIConnector(config_path="config/models.json", auto_start=False)
     test_model_key = temp_connector_for_config.model_key # Get the default model key
     del temp_connector_for_config # Don't need this instance anymore
 
@@ -86,7 +86,7 @@ async def test_vision_server_external():
     health_url = f"http://{SERVER_HOST}:{SERVER_PORT}/health"
 
     print(f"Target server endpoint: {server_url}")
-    print("!!! IMPORTANT: Ensure the LlamaVisionConnector server is running externally: !!!")
+    print("!!! IMPORTANT: Ensure the LlamaCLIConnector server is running externally: !!!")
     print(f"!!! `python llama_vision_connector.py server --port {SERVER_PORT}` !!!")
 
     try:

@@ -7,6 +7,8 @@ import openai
 from typing import Dict, List, Any, Optional
 import atexit
 import argparse
+import base64
+import mimetypes
 
 class LlamaServerConnector:
     """
@@ -29,31 +31,32 @@ class LlamaServerConnector:
                  host: str = "127.0.0.1",
                  max_attempts: int = 10,
                  attempt_delay: int = 1,
-                 debug_server: bool = False):
+                 debug_server: bool = False,
+                 client_timeout: Optional[float] = None):
         """
         Initialize the LlamaServerConnector with configuration from a JSON file.
         
         Args:
             config_path (str): Path to the configuration JSON file
             model_key (str, optional): Key of the model to use from config.
-                                     If None, will look for a model with appropriate config.
-            param_overrides (Dict[str, Any], optional): Parameter overrides from config.json
-            initial_port (int): Initial port to try for the server
-            host (str): Host address for the server
-            max_attempts (int): Maximum number of attempts to connect to the server
-            attempt_delay (int): Delay between connection attempts in seconds
-            debug_server (bool): If True, enable detailed debug printing for server process management.
+            param_overrides (Dict[str, Any], optional): Parameter overrides.
+            initial_port (int): Initial port to try for the server.
+            host (str): Host address for the server.
+            max_attempts (int): Maximum number of attempts to connect.
+            attempt_delay (int): Delay between connection attempts.
+            debug_server (bool): Enable detailed debug printing.
+            client_timeout (float, optional): Manual override for OpenAI client timeout (seconds).
+                                              If None, checks model config. 
+                                              If missing in config, defaults to None (Infinite).
         """
-        # Initialization guard prevents re-running init on the singleton instance
+        # Initialization guard
         if hasattr(self, 'initialized') and self.initialized:
-            # Optionally check if key parameters changed and reconfigure/restart if needed
-            # For now, we assume the first initialization is definitive for the singleton.
             if self.debug_server: print(">>> DEBUG: LlamaServerConnector already initialized. Skipping re-init.")
             return
 
         # Proceed with initialization only if instance doesn't exist or is not initialized
         print(f"Initializing LlamaServerConnector...")
-        self.debug_server = debug_server # STORE the flag
+        self.debug_server = debug_server
         self.config_path = config_path
         self.config = self._load_config(config_path)
         self.initial_port = initial_port
@@ -68,53 +71,49 @@ class LlamaServerConnector:
         if not models_config:
             raise ValueError("No models found in configuration")
                 
-        # If no model key is provided, use first model that doesn't require mmproj (non-vision model)
-        if model_key is None:
-            for key, model in models_config.items():
-                if "MMPROJ_PATH" not in model or not model.get("MMPROJ_PATH"):
-                    model_key = key
-                    break
-                
-                # If still no model found, use the first one
-                if model_key is None and models_config:
-                    model_key = next(iter(models_config.keys()))
+        # If no model key is provided, use first model
+        if model_key is None and models_config:
+            model_key = next(iter(models_config.keys()))
+        
+        if model_key not in models_config:
+            raise ValueError(f"Model '{model_key}' not found in configuration")
+        
+        self.model_config = models_config[model_key]
+        self.model_key = model_key
+        self.model_path = self.model_config.get("MODEL_PATH")
+        
+        # --- TIMEOUT LOGIC ---
+        # Priority: 1. Constructor/CLI Arg -> 2. Specific Model Config -> 3. Default (Infinite)
+        if client_timeout is not None:
+            self.client_timeout = client_timeout
+            print(f"Client configuration: Timeout set to {self.client_timeout}s (Manual Override).")
+        else:
+            # Look for CLIENT_TIMEOUT inside the specific model's config
+            self.client_timeout = self.model_config.get("CLIENT_TIMEOUT", None)
+            if self.client_timeout:
+                print(f"Client configuration: Timeout set to {self.client_timeout}s (From model config).")
+            else:
+                print("Client configuration: Timeout set to Infinite (None).")
+        
+        # Apply parameter overrides if provided
+        if param_overrides:
+            print(f"Applying parameter overrides: {param_overrides}")
+            self.model_config.update(param_overrides)
             
-            if model_key not in models_config:
-                raise ValueError(f"Model '{model_key}' not found in configuration")
-                
-            self.model_config = models_config[model_key]
-            self.model_key = model_key
-            self.model_path = self.model_config.get("MODEL_PATH")
-            
-            # Apply parameter overrides if provided
-            if param_overrides:
-                print(f"Applying parameter overrides: {param_overrides}")
-                self.model_config.update(param_overrides)
-            
-            if not self.model_path:
-                raise ValueError(f"Model path not specified for model: {model_key}")
-            
-            # Find available port and set server address
-            self.urlport = self.find_available_port(self.initial_port, self.host)
-            self.server_address = f"http://{host}:{self.urlport}/v1"
-            
-            # Start server
-            self.start_server()
-            self.initialized = True
+        # Find available port and set server address
+        self.urlport = self.find_available_port(self.initial_port, self.host)
+        self.server_address = f"http://{host}:{self.urlport}/v1"
+        
+        # Start server
+        self.start_server()
+        self.initialized = True
 
-            # Register kill_server to be called on script exit
-            atexit.register(self.kill_server)
+        # Register kill_server to be called on script exit
+        atexit.register(self.kill_server)
+
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """
-        Load configuration from a JSON file.
-        
-        Args:
-            config_path (str): Path to the configuration JSON file
-            
-        Returns:
-            dict: Configuration as a dictionary
-        """
+        """Load configuration from a JSON file."""
         try:
             with open(config_path, 'r') as f:
                 return json.load(f)
@@ -141,6 +140,15 @@ class LlamaServerConnector:
         self.model_config = self.config["MODELS"][model_key]
         self.model_key = model_key
         self.model_path = self.model_config.get("MODEL_PATH")
+
+        # Update timeout from the new model config (unless manually forced in a way we want to persist, 
+        # but standard behavior here is to adopt the new model's traits)
+        new_timeout = self.model_config.get("CLIENT_TIMEOUT", None)
+        self.client_timeout = new_timeout
+        if self.client_timeout:
+            print(f"Model changed. Client timeout updated to {self.client_timeout}s.")
+        else:
+            print(f"Model changed. Client timeout set to Infinite.")
         
         # Apply parameter overrides if provided
         if param_overrides:
@@ -180,7 +188,7 @@ class LlamaServerConnector:
         cmd.extend(["--temp", str(self.model_config.get("TEMPERATURE", 0.3))])
         
         # Add forced alignment and sampling mode
-        cmd.extend(["-fa", "-sm", "row"])
+        cmd.extend(["-fa", "on"])
         
         # Add chat template if specified
         chat_template = self.model_config.get("CHAT_TEMPLATE")
@@ -196,6 +204,10 @@ class LlamaServerConnector:
         
         # Add port
         cmd.extend(["--port", str(self.urlport)])
+        
+        # add the mmproj path if it exists
+        if "MMPROJ_PATH" in self.model_config:
+            cmd.extend(["--mmproj", self.model_config["MMPROJ_PATH"]])
         
         return cmd
 
@@ -330,14 +342,16 @@ class LlamaServerConnector:
         """Return the server URL for use with the OpenAI client."""
         return self.server_address
         
-    def get_response(self, prompt: str, api_key: str = None) -> Optional[str]:
+    def get_response(self, prompt: str, api_key: str = None, image_path: str = None, image_paths: List[str] = None) -> Optional[str]:
         """
         Send a prompt to the llama-server and get the response.
         
         Args:
             prompt (str): The input prompt to send to the model
             api_key (str, optional): API key if your server requires authentication
-        
+            image_path (str, optional): Path to a single image (legacy support)
+            image_paths (List[str], optional): List of paths to images to send to the model
+            
         Returns:
             str: The model's response text or None if there was an error
         """
@@ -345,23 +359,51 @@ class LlamaServerConnector:
         model = os.path.basename(self.model_path)
         
         # Configure the client
+        # Uses self.client_timeout resolved in __init__ (or set_model)
         client = openai.OpenAI(
             base_url=self.server_address,
-            api_key=api_key or "not-needed"  # llama-server typically doesn't require an API key
+            api_key=api_key or "not-needed",
+            timeout=self.client_timeout 
         )
+        
+        content = [{"type": "text", "text": prompt}]
+        
+        # Handle single image path (legacy)
+        if image_path and not image_paths:
+            image_paths = [image_path]
+            
+        if image_paths:
+            for img_path in image_paths:
+                try:
+                    mime_type, _ = mimetypes.guess_type(img_path)
+                    if mime_type is None:
+                        mime_type = "image/jpeg"  # Default fallback
+                    with open(img_path, "rb") as img_file:
+                        base64_image = base64.b64encode(img_file.read()).decode('utf-8')
+                    image_url = f"data:{mime_type};base64,{base64_image}"
+                    content.append({"type": "image_url", "image_url": {"url": image_url}})
+                except FileNotFoundError:
+                    print(f"Error: Image file not found at {img_path}")
+                    return None
+                except Exception as e:
+                    print(f"Error processing image {img_path}: {str(e)}")
+                    return None
         
         try:
             # Send the completion request
             response = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": content}
                 ]
             )
             
             # Extract and return the response text
             return response.choices[0].message.content
         
+        except openai.APITimeoutError:
+            print(f"Error: The request timed out (Limit: {self.client_timeout}s).")
+            return None
         except Exception as e:
             print(f"Error communicating with llm server: {str(e)}")
             return None
@@ -407,6 +449,9 @@ if __name__ == "__main__":
     parser.add_argument("--max-attempts", type=int, default=10, help="Maximum connection attempts.")
     parser.add_argument("--attempt-delay", type=int, default=1, help="Delay between connection attempts.")
     parser.add_argument("--debug-server", action='store_true', help="Enable server debug prints.")
+    
+    # NEW ARGUMENT
+    parser.add_argument("--client-timeout", type=float, default=None, help="Timeout in seconds for the OpenAI client. Default is None (infinite).")
 
     # Argument for the prompt
     parser.add_argument("--prompt", type=str, required=False, default=None, help="Optional prompt to send to the model for a single interaction (Direct Mode). If omitted, the server starts and runs until interrupted (Server Mode).")
@@ -428,7 +473,8 @@ if __name__ == "__main__":
             host=args.host,
             max_attempts=args.max_attempts,
             attempt_delay=args.attempt_delay,
-            debug_server=args.debug_server
+            debug_server=args.debug_server,
+            client_timeout=args.client_timeout # Pass CLI argument
         )
         
         # Get the server URL (just for information)

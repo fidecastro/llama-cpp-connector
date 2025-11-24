@@ -1,64 +1,37 @@
 {
     "VISION_PROMPT_FILENAME": "vision-prompt.txt",
-    "VALID_IMAGE_EXTENSIONS": [".jpg", ".jpeg", ".png", ".gif"],
+    "VALID_IMAGE_EXTENSIONS": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif"
+    ],
     "MODELS": {
-        "GEMMA3_12B":
-        {
+        "GEMMA3_27B": {
+            "CLIENT_TIMEOUT": 1200,
+            "RUN_WITH_SERVER": "True",
             "CLI_CMD": "llama-mtmd-cli",
-            "MODEL_PATH": "models/gemma-3-12b-it-Q6_K_L.gguf",      
-            "MMPROJ_PATH": "models/mmproj-gemma3-12b-it-f32.gguf",
+            "MODEL_PATH": "models/gemma-3-27b-it-qat-Q4_0.gguf",
+            "MMPROJ_PATH": "models/mmproj-model-f16-27B.gguf",
             "CACHE_TYPE_K": "q8_0",
             "CACHE_TYPE_V": "q8_0",
             "TEMPERATURE": 0.3,
             "NUM_LAYERS_TO_GPU": 99,
-            "NUM_TOKENS_TO_OUTPUT": 64000,
-            "NUM_TOKENS_OF_CONTEXT": 12000
+            "NUM_TOKENS_TO_OUTPUT": 32000,
+            "NUM_TOKENS_OF_CONTEXT": 32000
         },
-        "GEMMA3_27B":
-        {
+        "QWEN3_30B_A3B": {
+            "CLIENT_TIMEOUT": 1800,
+            "RUN_WITH_SERVER": "True",
             "CLI_CMD": "llama-mtmd-cli",
-            "MODEL_PATH": "models/gemma-3-27b-it-Q4_K_M.gguf",      
-            "MMPROJ_PATH": "models/mmproj-gemma3-27b-model-f16.gguf",
-            "CACHE_TYPE_K": "q4_0",
-            "CACHE_TYPE_V": "q4_0",
-            "TEMPERATURE": 0.3,
-            "NUM_LAYERS_TO_GPU": 99,
-            "NUM_TOKENS_TO_OUTPUT": 64000,
-            "NUM_TOKENS_OF_CONTEXT": 12000
-        },
-        "QWEN2_VL_7B":
-        {
-            "CLI_CMD": "llama-mtmd-cli",
-            "MODEL_PATH": "models/Qwen2-VL-7B-Instruct-Q8_0.gguf",      
-            "MMPROJ_PATH": "models/mmproj-Qwen2-VL-7B-Instruct-f16.gguf",
+            "MODEL_PATH": "models/Qwen3-VL-30B-A3B-Instruct-Q8_0.gguf",
+            "MMPROJ_PATH": "models/Qwen3-VL-mmproj-F16.gguf",
             "CACHE_TYPE_K": "q8_0",
             "CACHE_TYPE_V": "q8_0",
-            "TEMPERATURE": 0.3,
-            "NUM_LAYERS_TO_GPU": 99,
-            "NUM_TOKENS_TO_OUTPUT": 12772,
-            "NUM_TOKENS_OF_CONTEXT": 20000
-        },
-        "DEEPSEEK-R1-QWEN-14B":
-        {
-            "MODEL_PATH": "models/DeepSeek-R1-Distill-Qwen-14B-Q6_K.gguf",      
-            "CACHE_TYPE_K": "q8_0",
-            "CACHE_TYPE_V": "q8_0",
-            "TEMPERATURE": 0.3,
-            "NUM_LAYERS_TO_GPU": 99,
-            "NUM_TOKENS_TO_OUTPUT": 64000,
-            "NUM_TOKENS_OF_CONTEXT": 64000,
-            "CHAT_TEMPLATE": "deepseek3"
-        },
-        "QVQ_72B_PREVIEW": {
-            "CLI_CMD": "llama-mtmd-cli",
-            "MODEL_PATH": "models/QVQ-72B-Preview-GGUF",      
-            "MMPROJ_PATH": "models/mmproj-QVQ-72B-Preview-f16.gguf",
-            "CACHE_TYPE_K": "q8_0",
-            "CACHE_TYPE_V": "q8_0",
-            "TEMPERATURE": 0.3,
-            "NUM_LAYERS_TO_GPU": 99,
-            "NUM_TOKENS_TO_OUTPUT": 12772,
-            "NUM_TOKENS_OF_CONTEXT": 20000
+            "TEMPERATURE": 0.6,
+            "NUM_LAYERS_TO_GPU": 24,
+            "NUM_TOKENS_TO_OUTPUT": 32000,
+            "NUM_TOKENS_OF_CONTEXT": 128000
         }
     }
-  }
+}
