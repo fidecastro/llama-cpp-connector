@@ -181,6 +181,17 @@ class LlamaServerConnector:
             "-m", self.model_path,
         ]
         
+        # --- NEW: HANDLE SERVER-SIDE TIMEOUT ---
+        # llama-server defaults to 600s. We must override it.
+        # If client_timeout is None (Infinite), we pass 0 (Server Infinite).
+        # Otherwise, we pass the integer value of the timeout.
+        server_timeout = 0 
+        if self.client_timeout is not None:
+            server_timeout = int(self.client_timeout)
+        
+        # Add timeout
+        cmd.extend(["--timeout", str(server_timeout)])
+        
         # Add GPU layers
         cmd.extend(["-ngl", str(self.model_config.get("NUM_LAYERS_TO_GPU", 99))])
         
@@ -243,10 +254,16 @@ class LlamaServerConnector:
             
             if self._process is None or self._process.poll() is not None:
                 if self.debug_server: print(">>> DEBUG: Attempting subprocess.Popen...")
+                
+                # FIX: Use DEVNULL to prevent pipe buffer deadlocks unless debugging
+                # If you need logs, write to a file instead of a PIPE
+                stdout_dest = subprocess.PIPE if self.debug_server else subprocess.DEVNULL
+                stderr_dest = subprocess.PIPE if self.debug_server else subprocess.DEVNULL
+                
                 self._process = subprocess.Popen(
                     cmd, 
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=stdout_dest,
+                    stderr=stderr_dest,
                     text=True
                 )
                 if self.debug_server: print(f">>> DEBUG: subprocess.Popen succeeded. PID: {self._process.pid}")
