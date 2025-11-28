@@ -26,11 +26,11 @@ RUN echo "Configuring and building llama.cpp..." && \
     mkdir -p build && \
     cd build && \
     cmake .. \
-        -DLLAMA_CUDA=ON \
-        # You generally don't need BUILD_SHARED_LIBS=ON for llama.cpp unless you have specific needs
-        # The necessary .so files seem to be built by default now when CUDA is ON.
-        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
-        -DCMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined" && \
+    -DLLAMA_CUDA=ON \
+    # You generally don't need BUILD_SHARED_LIBS=ON for llama.cpp unless you have specific needs
+    # The necessary .so files seem to be built by default now when CUDA is ON.
+    -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined" && \
     cmake --build . --config Release -j $(nproc)
 
 # --- Final Artifact Collection ---
@@ -79,7 +79,7 @@ RUN ldconfig
 RUN mkdir -p /workspace/config /workspace/models /workspace/examples/test_images
 
 # Copy Python connector files, config folder, and examples to workspace
-COPY llama_vision_connector.py llama_server_connector.py /workspace/
+COPY llama_cli_connector.py llama_server_connector.py /workspace/
 COPY config/ /workspace/config/
 COPY models/ /workspace/models/
 COPY examples/ /workspace/examples/
