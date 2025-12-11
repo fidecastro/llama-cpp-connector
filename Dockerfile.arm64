@@ -1,0 +1,115 @@
+# Stage 1: Build environment
+# using standard ubuntu which supports arm64 natively
+FROM ubuntu:24.04 AS build
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+# Note: explicit openblas isn't strictly necessary as llama.cpp has great internal 
+# ARM kernels, but build-essential and cmake are critical.
+RUN apt-get update && \
+    apt-get install -y \
+    build-essential \
+    cmake \
+    python3 \
+    python3-pip \
+    python3-venv \
+    git \
+    pkg-config \
+    libcurl4-openssl-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Ensure latest code is fetched and submodules are updated
+RUN echo "Cloning latest llama.cpp..." && \
+    git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . && \
+    echo "Updating submodules..." && \
+    git submodule update --init --recursive
+
+# Configure and build llama.cpp for CPU (ARM64)
+RUN echo "Configuring and building llama.cpp for ARM64..." && \
+    mkdir -p build && \
+    cd build && \
+    cmake .. \
+    # Disable CUDA specifically
+    -DGGML_CUDA=OFF \
+    # Enable Shared Libs so we generate the .so files your runtime stage expects
+    -DBUILD_SHARED_LIBS=ON \
+    # Ensure CURL support is compiled in
+    -DGGML_CURL=ON \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined" && \
+    cmake --build . --config Release -j $(nproc)
+
+# --- Final Artifact Collection ---
+RUN echo "Collecting build artifacts from /app/build/bin/..." && \
+    rm -rf /app/artifacts && \
+    mkdir -p /app/artifacts && \
+    # Copy binaries
+    cp -v /app/build/bin/* /app/artifacts/ && \
+    # Copy shared libraries (often located in build/src or build/ depending on cmake version)
+    # We use find here to be robust against cmake folder structure changes
+    find /app/build -name "*.so" -exec cp -v {} /app/artifacts/ \;
+
+# Stage 2: Runtime environment
+FROM ubuntu:24.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies (No CUDA libs needed here)
+RUN apt-get update && \
+    apt-get install -y \
+    libcurl4 \
+    libgomp1 \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-requests \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Set up a virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Add virtualenv activation to .bashrc
+RUN echo 'source /opt/venv/bin/activate' >> /root/.bashrc
+
+# Copy requirements file into the image
+COPY requirements.txt /tmp/requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
+
+# --- Final Artifact Copying ---
+# Copy shared libraries (.so) to /usr/local/lib
+COPY --from=build /app/artifacts/*.so /usr/local/lib/
+# Copy executables to /usr/local/bin
+# We exclude .so files from this specific copy to keep bin clean
+COPY --from=build /app/artifacts/llama-* /usr/local/bin/
+
+# Set up library path and ensure ldconfig recognizes new libs
+ENV LD_LIBRARY_PATH=/usr/local/lib
+RUN ldconfig
+
+# Create workspace directory structure
+RUN mkdir -p /workspace/config /workspace/models /workspace/examples/test_images
+
+# Copy Python connector files, config folder, and examples
+COPY llama_cli_connector.py llama_server_connector.py /workspace/
+COPY config/ /workspace/config/
+COPY models/ /workspace/models/
+COPY examples/ /workspace/examples/
+
+# Set workspace as working directory
+WORKDIR /workspace
+
+# Entrypoint script
+RUN echo '#!/bin/bash\necho "Activating Python virtual environment..."\nsource /opt/venv/bin/activate\nPS1="(venv) \u@\h:\w\\$ "\nexec "$@"' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh", "/bin/bash", "-l"]
